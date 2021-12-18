@@ -169,7 +169,7 @@
             {
                 vecLastLeftHandPosition = finalPosition;
                 leftHandColliding = true;
-                if (bWasLeftHandTouching) OnSurfaceStartTouch(true, distanceTraveled * Time.fixedDeltaTime);
+                if (!bWasLeftHandTouching) OnSurfaceStartTouch(true, distanceTraveled * Time.fixedDeltaTime);
             }
             else
             {
@@ -184,7 +184,7 @@
             {
                 vecLastRightHandPosition = finalPosition;
                 rightHandColliding = true;
-                if (bWasRightHandTouching) OnSurfaceStartTouch(false, distanceTraveled * Time.fixedDeltaTime);
+                if (!bWasRightHandTouching) OnSurfaceStartTouch(false, distanceTraveled * Time.fixedDeltaTime);
             }
             else
             {
