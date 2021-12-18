@@ -52,6 +52,16 @@
                 hInstance = this;
             InitializeValues();
         }
+        
+        private void OnSurfaceStartTouch(bool isLeftHand, Vector3 playerVel)
+        {
+            // Play sound & Haptic feedback/impulse
+        }
+
+        private void OnSurfaceEndTouch(bool isLeftHand, Vector3 playerVel)
+        {
+
+        }
 
         public void InitializeValues()
         {
@@ -99,7 +109,7 @@
             RaycastHit hitInfo;
 
             hBodyCollider.transform.eulerAngles = new Vector3(0, hHeadCollider.transform.eulerAngles.y, 0);
-            Vector3 timeSaving1 = Vector3.down * 2.0f * 9.81f * Time.deltaTime * Time.deltaTime;
+            Vector3 timeSaving1 = Vector3.down * 2.0f * 9.81f * Time.fixedDeltaTime * Time.fixedDeltaTime;
 
             // Left hand
 
@@ -159,6 +169,7 @@
             {
                 vecLastLeftHandPosition = finalPosition;
                 leftHandColliding = true;
+                if (bWasLeftHandTouching) OnSurfaceStartTouch(true, distanceTraveled * Time.fixedDeltaTime);
             }
             else
             {
@@ -173,6 +184,7 @@
             {
                 vecLastRightHandPosition = finalPosition;
                 rightHandColliding = true;
+                if (bWasRightHandTouching) OnSurfaceStartTouch(false, distanceTraveled * Time.fixedDeltaTime);
             }
             else
             {
@@ -204,6 +216,7 @@
             {
                 vecLastLeftHandPosition = CurrentLeftHandPosition();
                 leftHandColliding = false;
+                OnSurfaceEndTouch(true, distanceTraveled * Time.fixedDeltaTime);
             }
 
             // Check to see if right hand is stuck and we should unstick it
@@ -212,7 +225,14 @@
             {
                 vecLastRightHandPosition = CurrentRightHandPosition();
                 rightHandColliding = false;
+                OnSurfaceEndTouch(false, distanceTraveled * Time.fixedDeltaTime);
             }
+
+            // KILL MAN: idk if need this exactly
+            if(bWasLeftHandTouching && !leftHandColliding)
+                OnSurfaceEndTouch(true, distanceTraveled * Time.fixedDeltaTime);
+            else if(bWasRightHandTouching && !rightHandColliding)
+                OnSurfaceEndTouch(false, distanceTraveled * Time.fixedDeltaTime);
 
             hLeftHandFollower.position = vecLastLeftHandPosition;
             hRightHandFollower.position = vecLastRightHandPosition;
@@ -260,7 +280,8 @@
             {
                 endPosition = startPosition;
                 return true;
-            } else
+            }
+            else
             {
                 endPosition = Vector3.zero;
                 return false;
@@ -327,7 +348,7 @@
         private void StoreVelocities()
         {
             nCurrentVelIndex = (nCurrentVelIndex + 1) % nVelHistorySize;
-            vecCurrentVel = (transform.position - vecLastPlayerPosition) / Time.deltaTime;
+            vecCurrentVel = (transform.position - vecLastPlayerPosition) / Time.fixedDeltaTime;
             vecDenormalizedVelAverage += (vecCurrentVel - vecVelHistory[nCurrentVelIndex]) / (float)nVelHistorySize;
             vecVelHistory[nCurrentVelIndex] = vecCurrentVel;
             vecLastPlayerPosition = transform.position;
