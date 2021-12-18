@@ -4,99 +4,82 @@
 
     public class Player : MonoBehaviour
     {
-        private static Player _instance;
+    // Constants
+        public const float m_flMinRaycastDistance = 0.05f;
+        public const float m_flDefaultPrecision = 0.995f;
 
-        public static Player Instance { get { return _instance; } }
+    // Private Fields
+        private static Player m_hInstance;
+        private Rigidbody m_hPlayerRigidBody;
+        private Vector3 m_vecLastLeftHandPosition, m_vecLastRightHandPosition, m_vecLastHeadPosition;
 
-        public SphereCollider headCollider;
-        public CapsuleCollider bodyCollider;
+        // Those are only for saving
+        private Vector3[] m_vecVelHistory;
+        private int m_nCurrentVelIndex;
+        private Vector3 m_vecCurrentVel;
+        private Vector3 m_vecDenormalizedVelAverage;
+        private Vector3 m_vecLastPlayerPosition;
 
-        public Transform leftHandFollower;
-        public Transform rightHandFollower;
+    // Public Fields
+        public static Player GetInstance { get { return m_hInstance; } }
+        public SphereCollider m_hHeadCollider;
+        public CapsuleCollider m_hBodyCollider;
+        public Transform m_hLeftHandFollower, m_hLeftHandTransform;
+        public Transform m_hRightHandFollower, m_hRightHandTransform;
+        public bool m_bFreezePlayer = false;
 
-        public Transform rightHandTransform;
-        public Transform leftHandTransform;
+        public int m_nVelHistorySize; // Should be used in editor
+        public float m_flVelLimit;
+        public float m_flMaxArmLength = 1.0f; // KILL MAN: 1.5 meters is kinda big... TODO: Find a better value
+        public float m_flUnStickDistance = 1.0f;
 
-        private Vector3 lastLeftHandPosition;
-        private Vector3 lastRightHandPosition;
-        private Vector3 lastHeadPosition;
+        public float m_flMaxJumpSpeed;
+        public float m_flJumpMultiplier;
 
-        private Rigidbody playerRigidBody;
+        public Vector3 m_vecRightHandOffset;
+        public Vector3 m_vecLeftHandOffset;
 
-        public int velocityHistorySize;
-        public float maxArmLength = 1.5f;
-        public float unStickDistance = 1f;
+        public LayerMask m_stLocomotionEnabledLayers;
 
-        public float velocityLimit;
-        public float maxJumpSpeed;
-        public float jumpMultiplier;
-        public float minimumRaycastDistance = 0.05f;
-        public float defaultSlideFactor = 0.03f;
-        public float defaultPrecision = 0.995f;
+        public bool m_bWasLeftHandTouching, m_bWasRightHandTouching;
 
-        private Vector3[] velocityHistory;
-        private int velocityIndex;
-        private Vector3 currentVelocity;
-        private Vector3 denormalizedVelocityAverage;
-        private bool jumpHandIsLeft;
-        private Vector3 lastPosition;
-
-        public Vector3 rightHandOffset;
-        public Vector3 leftHandOffset;
-
-        public LayerMask locomotionEnabledLayers;
-
-        public bool wasLeftHandTouching;
-        public bool wasRightHandTouching;
-
-        public bool disableMovement = false;
-
+    // Functions start
         private void Awake()
         {
-            if (_instance != null && _instance != this)
-            {
+            if (m_hInstance != null && m_hInstance != this)
                 Destroy(gameObject);
-            }
             else
-            {
-                _instance = this;
-            }
+                m_hInstance = this;
             InitializeValues();
         }
 
         public void InitializeValues()
         {
-            playerRigidBody = GetComponent<Rigidbody>();
-            velocityHistory = new Vector3[velocityHistorySize];
-            lastLeftHandPosition = leftHandFollower.transform.position;
-            lastRightHandPosition = rightHandFollower.transform.position;
-            lastHeadPosition = headCollider.transform.position;
-            velocityIndex = 0;
-            lastPosition = transform.position;
+            m_hPlayerRigidBody = GetComponent<Rigidbody>();
+            m_vecVelHistory = new Vector3[m_nVelHistorySize];
+            m_nCurrentVelIndex = 0;
+            m_vecLastLeftHandPosition = m_hLeftHandFollower.transform.position;
+            m_vecLastRightHandPosition = m_hRightHandFollower.transform.position;
+            m_vecLastHeadPosition = m_hHeadCollider.transform.position;
+            m_vecLastPlayerPosition = transform.position;
         }
 
         private Vector3 CurrentLeftHandPosition()
         {
-            if ((PositionWithOffset(leftHandTransform, leftHandOffset) - headCollider.transform.position).magnitude < maxArmLength)
+            if ((PositionWithOffset(m_hLeftHandTransform, m_vecLeftHandOffset) - m_hHeadCollider.transform.position).magnitude < m_flMaxArmLength)
             {
-                return PositionWithOffset(leftHandTransform, leftHandOffset);
+                return PositionWithOffset(m_hLeftHandTransform, m_vecLeftHandOffset);
             }
-            else
-            {
-                return headCollider.transform.position + (PositionWithOffset(leftHandTransform, leftHandOffset) - headCollider.transform.position).normalized * maxArmLength;
-            }
+            return m_hHeadCollider.transform.position + (PositionWithOffset(m_hLeftHandTransform, m_vecLeftHandOffset) - m_hHeadCollider.transform.position).normalized * m_flMaxArmLength;
         }
 
         private Vector3 CurrentRightHandPosition()
         {
-            if ((PositionWithOffset(rightHandTransform, rightHandOffset) - headCollider.transform.position).magnitude < maxArmLength)
+            if ((PositionWithOffset(m_hRightHandTransform, m_vecRightHandOffset) - m_hHeadCollider.transform.position).magnitude < m_flMaxArmLength)
             {
-                return PositionWithOffset(rightHandTransform, rightHandOffset);
+                return PositionWithOffset(m_hRightHandTransform, m_vecRightHandOffset);
             }
-            else
-            {
-                return headCollider.transform.position + (PositionWithOffset(rightHandTransform, rightHandOffset) - headCollider.transform.position).normalized * maxArmLength;
-            }
+            return m_hHeadCollider.transform.position + (PositionWithOffset(m_hRightHandTransform, m_vecRightHandOffset) - m_hHeadCollider.transform.position).normalized * m_flMaxArmLength;
         }
 
         private Vector3 PositionWithOffset(Transform transformToModify, Vector3 offsetVector)
@@ -104,79 +87,61 @@
             return transformToModify.position + transformToModify.rotation * offsetVector;
         }
 
-        private void Update()
+        // KILL MAN: Probably needs to be a FixedUpdate
+        private void FixedUpdate()
         {
             bool leftHandColliding = false;
             bool rightHandColliding = false;
             Vector3 finalPosition;
-            Vector3 rigidBodyMovement = Vector3.zero;
             Vector3 firstIterationLeftHand = Vector3.zero;
             Vector3 firstIterationRightHand = Vector3.zero;
+            Vector3 rigidBodyMovement = Vector3.zero;
             RaycastHit hitInfo;
 
-            bodyCollider.transform.eulerAngles = new Vector3(0, headCollider.transform.eulerAngles.y, 0);
+            m_hBodyCollider.transform.eulerAngles = new Vector3(0, m_hHeadCollider.transform.eulerAngles.y, 0);
+            Vector3 timeSaving1 = Vector3.down * 2.0f * 9.81f * Time.deltaTime * Time.deltaTime;
 
-            //left hand
+            // Left hand
 
-            Vector3 distanceTraveled = CurrentLeftHandPosition() - lastLeftHandPosition + Vector3.down * 2f * 9.8f * Time.deltaTime * Time.deltaTime;
-
-            if (IterativeCollisionSphereCast(lastLeftHandPosition, minimumRaycastDistance, distanceTraveled, defaultPrecision, out finalPosition, true))
+            Vector3 distanceTraveled = CurrentLeftHandPosition() - m_vecLastLeftHandPosition + timeSaving1;
+            if (IterativeCollisionSphereCast(m_vecLastLeftHandPosition, m_flMinRaycastDistance, distanceTraveled, m_flDefaultPrecision, out finalPosition, true))
             {
-                //this lets you stick to the position you touch, as long as you keep touching the surface this will be the zero point for that hand
-                if (wasLeftHandTouching)
-                {
-                    firstIterationLeftHand = lastLeftHandPosition - CurrentLeftHandPosition();
-                }
-                else
-                {
-                    firstIterationLeftHand = finalPosition - CurrentLeftHandPosition();
-                }
-                playerRigidBody.velocity = Vector3.zero;
+                // This lets you stick to the position you touch, as long as you keep touching the surface this will be the zero point for that hand
+                firstIterationLeftHand = (m_bWasLeftHandTouching ? m_vecLastLeftHandPosition : finalPosition) - CurrentLeftHandPosition();
+                m_hPlayerRigidBody.velocity = Vector3.zero;
 
                 leftHandColliding = true;
             }
 
-            //right hand
+            // Right hand
 
-            distanceTraveled = CurrentRightHandPosition() - lastRightHandPosition + Vector3.down * 2f * 9.8f * Time.deltaTime * Time.deltaTime;
-
-            if (IterativeCollisionSphereCast(lastRightHandPosition, minimumRaycastDistance, distanceTraveled, defaultPrecision, out finalPosition, true))
+            distanceTraveled = CurrentRightHandPosition() - m_vecLastRightHandPosition + timeSaving1;
+            if (IterativeCollisionSphereCast(m_vecLastRightHandPosition, m_flMinRaycastDistance, distanceTraveled, m_flDefaultPrecision, out finalPosition, true))
             {
-                if (wasRightHandTouching)
-                {
-                    firstIterationRightHand = lastRightHandPosition - CurrentRightHandPosition();
-                }
-                else
-                {
-                    firstIterationRightHand = finalPosition - CurrentRightHandPosition();
-                }
-
-                playerRigidBody.velocity = Vector3.zero;
+                firstIterationRightHand = (m_bWasRightHandTouching ? m_vecLastRightHandPosition : finalPosition) - CurrentRightHandPosition();
+                m_hPlayerRigidBody.velocity = Vector3.zero;
 
                 rightHandColliding = true;
             }
 
-            //average or add
+            // Average or Add
 
-            if ((leftHandColliding || wasLeftHandTouching) && (rightHandColliding || wasRightHandTouching))
+            rigidBodyMovement = firstIterationLeftHand + firstIterationRightHand;
+            if ((leftHandColliding || m_bWasLeftHandTouching) && (rightHandColliding || m_bWasRightHandTouching))
             {
-                //this lets you grab stuff with both hands at the same time
-                rigidBodyMovement = (firstIterationLeftHand + firstIterationRightHand) / 2;
-            }
-            else
-            {
-                rigidBodyMovement = firstIterationLeftHand + firstIterationRightHand;
+                // This lets you grab stuff with both hands at the same time
+                rigidBodyMovement *= 0.5f;
             }
 
-            //check valid head movement
+            // Check valid head movement
 
-            if (IterativeCollisionSphereCast(lastHeadPosition, headCollider.radius, headCollider.transform.position + rigidBodyMovement - lastHeadPosition, defaultPrecision, out finalPosition, false))
+            if (IterativeCollisionSphereCast(m_vecLastHeadPosition, m_hHeadCollider.radius, m_hHeadCollider.transform.position + rigidBodyMovement - m_vecLastHeadPosition, m_flDefaultPrecision, out finalPosition, false))
             {
-                rigidBodyMovement = finalPosition - lastHeadPosition;
-                //last check to make sure the head won't phase through geometry
-                if (Physics.Raycast(lastHeadPosition, headCollider.transform.position - lastHeadPosition + rigidBodyMovement, out hitInfo, (headCollider.transform.position - lastHeadPosition + rigidBodyMovement).magnitude + headCollider.radius * defaultPrecision * 0.999f, locomotionEnabledLayers.value))
+                rigidBodyMovement = finalPosition - m_vecLastHeadPosition;
+                // Last check to make sure the head won't phase through geometry
+                if (Physics.Raycast(m_vecLastHeadPosition, m_hHeadCollider.transform.position - m_vecLastHeadPosition + rigidBodyMovement, out hitInfo, (m_hHeadCollider.transform.position - m_vecLastHeadPosition + rigidBodyMovement).magnitude + m_hHeadCollider.radius * m_flDefaultPrecision * 0.999f, m_stLocomotionEnabledLayers.value))
                 {
-                    rigidBodyMovement = lastHeadPosition - headCollider.transform.position;
+                    rigidBodyMovement = m_vecLastHeadPosition - m_hHeadCollider.transform.position;
                 }
             }
 
@@ -184,75 +149,76 @@
             {
                 transform.position = transform.position + rigidBodyMovement;
             }
+            m_vecLastHeadPosition = m_hHeadCollider.transform.position;
 
-            lastHeadPosition = headCollider.transform.position;
+            // Do final left hand position
 
-            //do final left hand position
+            distanceTraveled = CurrentLeftHandPosition() - m_vecLastLeftHandPosition;
 
-            distanceTraveled = CurrentLeftHandPosition() - lastLeftHandPosition;
-
-            if (IterativeCollisionSphereCast(lastLeftHandPosition, minimumRaycastDistance, distanceTraveled, defaultPrecision, out finalPosition, !((leftHandColliding || wasLeftHandTouching) && (rightHandColliding || wasRightHandTouching))))
+            if (IterativeCollisionSphereCast(m_vecLastLeftHandPosition, m_flMinRaycastDistance, distanceTraveled, m_flDefaultPrecision, out finalPosition, !((leftHandColliding || m_bWasLeftHandTouching) && (rightHandColliding || m_bWasRightHandTouching))))
             {
-                lastLeftHandPosition = finalPosition;
+                m_vecLastLeftHandPosition = finalPosition;
                 leftHandColliding = true;
             }
             else
             {
-                lastLeftHandPosition = CurrentLeftHandPosition();
+                m_vecLastLeftHandPosition = CurrentLeftHandPosition();
             }
 
-            //do final right hand position
+            // Do final right hand position
 
-            distanceTraveled = CurrentRightHandPosition() - lastRightHandPosition;
+            distanceTraveled = CurrentRightHandPosition() - m_vecLastRightHandPosition;
 
-            if (IterativeCollisionSphereCast(lastRightHandPosition, minimumRaycastDistance, distanceTraveled, defaultPrecision, out finalPosition, !((leftHandColliding || wasLeftHandTouching) && (rightHandColliding || wasRightHandTouching))))
+            if (IterativeCollisionSphereCast(m_vecLastRightHandPosition, m_flMinRaycastDistance, distanceTraveled, m_flDefaultPrecision, out finalPosition, !((leftHandColliding || m_bWasLeftHandTouching) && (rightHandColliding || m_bWasRightHandTouching))))
             {
-                lastRightHandPosition = finalPosition;
+                m_vecLastRightHandPosition = finalPosition;
                 rightHandColliding = true;
             }
             else
             {
-                lastRightHandPosition = CurrentRightHandPosition();
+                m_vecLastRightHandPosition = CurrentRightHandPosition();
             }
+
+            // More checks?
 
             StoreVelocities();
 
-            if ((rightHandColliding || leftHandColliding) && !disableMovement)
+            if ((rightHandColliding || leftHandColliding) && !m_bFreezePlayer)
             {
-                if (denormalizedVelocityAverage.magnitude > velocityLimit)
+                if (m_vecDenormalizedVelAverage.magnitude > m_flVelLimit)
                 {
-                    if (denormalizedVelocityAverage.magnitude * jumpMultiplier > maxJumpSpeed)
+                    if (m_vecDenormalizedVelAverage.magnitude * m_flJumpMultiplier > m_flMaxJumpSpeed)
                     {
-                        playerRigidBody.velocity = denormalizedVelocityAverage.normalized * maxJumpSpeed;
+                        m_hPlayerRigidBody.velocity = m_vecDenormalizedVelAverage.normalized * m_flMaxJumpSpeed;
                     }
                     else
                     {
-                        playerRigidBody.velocity = jumpMultiplier * denormalizedVelocityAverage;
+                        m_hPlayerRigidBody.velocity = m_flJumpMultiplier * m_vecDenormalizedVelAverage;
                     }
                 }
             }
 
-            //check to see if left hand is stuck and we should unstick it
+            // Check to see if left hand is stuck and we should unstick it
 
-            if (leftHandColliding && (CurrentLeftHandPosition() - lastLeftHandPosition).magnitude > unStickDistance && !Physics.SphereCast(headCollider.transform.position, minimumRaycastDistance * defaultPrecision, CurrentLeftHandPosition() - headCollider.transform.position, out hitInfo, (CurrentLeftHandPosition() - headCollider.transform.position).magnitude - minimumRaycastDistance, locomotionEnabledLayers.value))
+            if (leftHandColliding && (CurrentLeftHandPosition() - m_vecLastLeftHandPosition).magnitude > m_flUnStickDistance && !Physics.SphereCast(m_hHeadCollider.transform.position, m_flMinRaycastDistance * m_flDefaultPrecision, CurrentLeftHandPosition() - m_hHeadCollider.transform.position, out hitInfo, (CurrentLeftHandPosition() - m_hHeadCollider.transform.position).magnitude - m_flMinRaycastDistance, m_stLocomotionEnabledLayers.value))
             {
-                lastLeftHandPosition = CurrentLeftHandPosition();
+                m_vecLastLeftHandPosition = CurrentLeftHandPosition();
                 leftHandColliding = false;
             }
 
-            //check to see if right hand is stuck and we should unstick it
+            // Check to see if right hand is stuck and we should unstick it
 
-            if (rightHandColliding && (CurrentRightHandPosition() - lastRightHandPosition).magnitude > unStickDistance && !Physics.SphereCast(headCollider.transform.position, minimumRaycastDistance * defaultPrecision, CurrentRightHandPosition() - headCollider.transform.position, out hitInfo, (CurrentRightHandPosition() - headCollider.transform.position).magnitude - minimumRaycastDistance, locomotionEnabledLayers.value))
+            if (rightHandColliding && (CurrentRightHandPosition() - m_vecLastRightHandPosition).magnitude > m_flUnStickDistance && !Physics.SphereCast(m_hHeadCollider.transform.position, m_flMinRaycastDistance * m_flDefaultPrecision, CurrentRightHandPosition() - m_hHeadCollider.transform.position, out hitInfo, (CurrentRightHandPosition() - m_hHeadCollider.transform.position).magnitude - m_flMinRaycastDistance, m_stLocomotionEnabledLayers.value))
             {
-                lastRightHandPosition = CurrentRightHandPosition();
+                m_vecLastRightHandPosition = CurrentRightHandPosition();
                 rightHandColliding = false;
             }
 
-            leftHandFollower.position = lastLeftHandPosition;
-            rightHandFollower.position = lastRightHandPosition;
+            m_hLeftHandFollower.position = m_vecLastLeftHandPosition;
+            m_hRightHandFollower.position = m_vecLastRightHandPosition;
 
-            wasLeftHandTouching = leftHandColliding;
-            wasRightHandTouching = rightHandColliding;
+            m_bWasLeftHandTouching = leftHandColliding;
+            m_bWasRightHandTouching = rightHandColliding;
         }
 
         private bool IterativeCollisionSphereCast(Vector3 startPosition, float sphereRadius, Vector3 movementVector, float precision, out Vector3 endPosition, bool singleHand)
@@ -261,35 +227,35 @@
             Vector3 movementToProjectedAboveCollisionPlane;
             Surface gorillaSurface;
             float slipPercentage;
-            //first spherecast from the starting position to the final position
+            // First spherecast from the starting position to the final position
             if (CollisionsSphereCast(startPosition, sphereRadius * precision, movementVector, precision, out endPosition, out hitInfo))
             {
-                //if we hit a surface, do a bit of a slide. this makes it so if you grab with two hands you don't stick 100%, and if you're pushing along a surface while braced with your head, your hand will slide a bit
+                // If we hit a surface, do a bit of a slide. this makes it so if you grab with two hands you don't stick 100%, and if you're pushing along a surface while braced with your head, your hand will slide a bit
 
-                //take the surface normal that we hit, then along that plane, do a spherecast to a position a small distance away to account for moving perpendicular to that surface
+                // Take the surface normal that we hit, then along that plane, do a spherecast to a position a small distance away to account for moving perpendicular to that surface
                 Vector3 firstPosition = endPosition;
                 gorillaSurface = hitInfo.collider.GetComponent<Surface>();
-                slipPercentage = gorillaSurface != null ? gorillaSurface.slipPercentage : (!singleHand ? defaultSlideFactor : 0.001f);
+                slipPercentage = gorillaSurface != null ? gorillaSurface.m_flSlipPercentage : (!singleHand ? Surface.m_flDefaultSlipPercentage : 0.001f);
                 movementToProjectedAboveCollisionPlane = Vector3.ProjectOnPlane(startPosition + movementVector - firstPosition, hitInfo.normal) * slipPercentage;
                 if (CollisionsSphereCast(endPosition, sphereRadius, movementToProjectedAboveCollisionPlane, precision * precision, out endPosition, out hitInfo))
                 {
-                    //if we hit trying to move perpendicularly, stop there and our end position is the final spot we hit
+                    // If we hit trying to move perpendicularly, stop there and our end position is the final spot we hit
                     return true;
                 }
-                //if not, try to move closer towards the true point to account for the fact that the movement along the normal of the hit could have moved you away from the surface
+                // If not, try to move closer towards the true point to account for the fact that the movement along the normal of the hit could have moved you away from the surface
                 else if (CollisionsSphereCast(movementToProjectedAboveCollisionPlane + firstPosition, sphereRadius, startPosition + movementVector - (movementToProjectedAboveCollisionPlane + firstPosition), precision * precision * precision, out endPosition, out hitInfo))
                 {
-                    //if we hit, then return the spot we hit
+                    // If we hit, then return the spot we hit
                     return true;
                 }
                 else
                 {
-                    //this shouldn't really happe, since this means that the sliding motion got you around some corner or something and let you get to your final point. back off because something strange happened, so just don't do the slide
+                    // This shouldn't really happen, since this means that the sliding motion got you around some corner or something and let you get to your final point. back off because something strange happened, so just don't do the slide
                     endPosition = firstPosition;
                     return true;
                 }
             }
-            //as kind of a sanity check, try a smaller spherecast. this accounts for times when the original spherecast was already touching a surface so it didn't trigger correctly
+            // As kind of a sanity check, try a smaller spherecast. This accounts for times when the original spherecast was already touching a surface so it didn't trigger correctly
             else if (CollisionsSphereCast(startPosition, sphereRadius * precision * 0.66f, movementVector.normalized * (movementVector.magnitude + sphereRadius * precision * 0.34f), precision * 0.66f, out endPosition, out hitInfo))
             {
                 endPosition = startPosition;
@@ -303,24 +269,24 @@
 
         private bool CollisionsSphereCast(Vector3 startPosition, float sphereRadius, Vector3 movementVector, float precision, out Vector3 finalPosition, out RaycastHit hitInfo)
         {
-            //kind of like a souped up spherecast. includes checks to make sure that the sphere we're using, if it touches a surface, is pushed away the correct distance (the original sphereradius distance). since you might
-            //be pushing into sharp corners, this might not always be valid, so that's what the extra checks are for
+            // Kind of like a souped up spherecast. Includes checks to make sure that the sphere we're using, if it touches a surface, is pushed away the correct distance (the original sphereradius distance). Since you might
+            // be pushing into sharp corners, this might not always be valid, so that's what the extra checks are for
 
-            //initial spherecase
+            // Initial spherecase
             RaycastHit innerHit;
-            if (Physics.SphereCast(startPosition, sphereRadius * precision, movementVector, out hitInfo, movementVector.magnitude + sphereRadius * (1 - precision), locomotionEnabledLayers.value))
+            if (Physics.SphereCast(startPosition, sphereRadius * precision, movementVector, out hitInfo, movementVector.magnitude + sphereRadius * (1 - precision), m_stLocomotionEnabledLayers.value))
             {
-                //if we hit, we're trying to move to a position a sphereradius distance from the normal
+                // If we hit, we're trying to move to a position a sphereradius distance from the normal
                 finalPosition = hitInfo.point + hitInfo.normal * sphereRadius;
 
-                //check a spherecase from the original position to the intended final position
-                if (Physics.SphereCast(startPosition, sphereRadius * precision * precision, finalPosition - startPosition, out innerHit, (finalPosition - startPosition).magnitude + sphereRadius * (1 - precision * precision), locomotionEnabledLayers.value))
+                // Check a spherecase from the original position to the intended final position
+                if (Physics.SphereCast(startPosition, sphereRadius * precision * precision, finalPosition - startPosition, out innerHit, (finalPosition - startPosition).magnitude + sphereRadius * (1 - precision * precision), m_stLocomotionEnabledLayers.value))
                 {
                     finalPosition = startPosition + (finalPosition - startPosition).normalized * Mathf.Max(0, hitInfo.distance - sphereRadius * (1f - precision * precision));
                     hitInfo = innerHit;
                 }
-                //bonus raycast check to make sure that something odd didn't happen with the spherecast. helps prevent clipping through geometry
-                else if (Physics.Raycast(startPosition, finalPosition - startPosition, out innerHit, (finalPosition - startPosition).magnitude + sphereRadius * precision * precision * 0.999f, locomotionEnabledLayers.value))
+                // Bonus raycast check to make sure that something odd didn't happen with the spherecast. helps prevent clipping through geometry
+                else if (Physics.Raycast(startPosition, finalPosition - startPosition, out innerHit, (finalPosition - startPosition).magnitude + sphereRadius * precision * precision * 0.999f, m_stLocomotionEnabledLayers.value))
                 {
                     finalPosition = startPosition;
                     hitInfo = innerHit;
@@ -328,8 +294,9 @@
                 }
                 return true;
             }
-            //anti-clipping through geometry check
-            else if (Physics.Raycast(startPosition, movementVector, out hitInfo, movementVector.magnitude + sphereRadius * precision * 0.999f, locomotionEnabledLayers.value))
+            // Anti-clipping through geometry check
+            // KILL MAN: TODO: Probably not enough
+            else if (Physics.Raycast(startPosition, movementVector, out hitInfo, movementVector.magnitude + sphereRadius * precision * 0.999f, m_stLocomotionEnabledLayers.value))
             {
                 finalPosition = startPosition;
                 return true;
@@ -341,36 +308,29 @@
             }
         }
 
-        public bool IsHandTouching(bool forLeftHand)
+        public bool IsHandTouching(bool checkLeftHand)
         {
-            if (forLeftHand)
-            {
-                return wasLeftHandTouching;
-            }
-            else
-            {
-                return wasRightHandTouching;
-            }
+            return checkLeftHand ? m_bWasLeftHandTouching : m_bWasRightHandTouching;
         }
 
         public void Turn(float degrees)
         {
-            transform.RotateAround(headCollider.transform.position, transform.up, degrees);
-            denormalizedVelocityAverage = Quaternion.Euler(0, degrees, 0) * denormalizedVelocityAverage;
-            for (int i = 0; i < velocityHistory.Length; i++)
+            Quaternion tmp = Quaternion.Euler(0, degrees, 0); // KILL MAN: Do not calculate it that often..?
+            transform.RotateAround(m_hHeadCollider.transform.position, transform.up, degrees);
+            m_vecDenormalizedVelAverage = tmp * m_vecDenormalizedVelAverage;
+            for (int i = 0; i < m_vecVelHistory.Length; ++i)
             {
-                velocityHistory[i] = Quaternion.Euler(0, degrees, 0) * velocityHistory[i];
+                m_vecVelHistory[i] = tmp * m_vecVelHistory[i];
             }
         }
 
         private void StoreVelocities()
         {
-            velocityIndex = (velocityIndex + 1) % velocityHistorySize;
-            Vector3 oldestVelocity = velocityHistory[velocityIndex];
-            currentVelocity = (transform.position - lastPosition) / Time.deltaTime;
-            denormalizedVelocityAverage += (currentVelocity - oldestVelocity) / (float)velocityHistorySize;
-            velocityHistory[velocityIndex] = currentVelocity;
-            lastPosition = transform.position;
+            m_nCurrentVelIndex = (m_nCurrentVelIndex + 1) % m_nVelHistorySize;
+            m_vecCurrentVel = (transform.position - m_vecLastPlayerPosition) / Time.deltaTime;
+            m_vecDenormalizedVelAverage += (m_vecCurrentVel - m_vecVelHistory[m_nCurrentVelIndex]) / (float)m_nVelHistorySize;
+            m_vecVelHistory[m_nCurrentVelIndex] = m_vecCurrentVel;
+            m_vecLastPlayerPosition = transform.position;
         }
     }
 }
