@@ -11,7 +11,8 @@
     }
     public class Surface : MonoBehaviour
     {
-        public const float flDefaultSlipPercentage = 0.03f;
+        public const float flDefaultSlipPercentage = 0.001f;
+        public const float flDefaultSlipPercentageHug = 0.03f;
 
         public float flSlipPercentage;
         public SurfaceMaterial eSurfaceMaterial;

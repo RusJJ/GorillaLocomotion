@@ -14,6 +14,7 @@
         private Vector3 vecLastLeftHandPosition, vecLastRightHandPosition, vecLastHeadPosition;
 
         // Those are only for saving
+        private int nVelHistoryLength;
         private Vector3[] vecVelHistory;
         private int nCurrentVelIndex;
         private Vector3 vecCurrentVel;
@@ -28,13 +29,13 @@
         public Transform hRightHandFollower, hRightHandTransform;
         public bool bFreezePlayer = false;
 
-        public int nVelHistorySize; // Should be used in editor
-        public float flVelLimit;
+        public int nVelHistorySize = 5; // Should be used in editor
+        public float flVelLimit = 0.3f; // m/s ?
         public float flMaxArmLength = 1.0f; // KILL MAN: 1.5 meters is kinda big... TODO: Find a better value
-        public float flUnStickDistance = 1.0f;
+        public float flUnStickDistance = 0.3f; // Teleport our hand if it's stuck
 
-        public float flMaxJumpSpeed;
-        public float flJumpMultiplier;
+        public float flMaxJumpSpeed = 6.5f; // Max jump speed
+        public float flJumpMultiplier = 1.0f; // Jump impulse multiplier
 
         public Vector3 vecRightHandOffset;
         public Vector3 vecLeftHandOffset;
@@ -67,6 +68,7 @@
         {
             hPlayerRigidBody = GetComponent<Rigidbody>();
             vecVelHistory = new Vector3[nVelHistorySize];
+            nVelHistoryLength = nVelHistorySize;
             nCurrentVelIndex = 0;
             vecLastLeftHandPosition = hLeftHandFollower.transform.position;
             vecLastRightHandPosition = hRightHandFollower.transform.position;
@@ -98,6 +100,7 @@
         }
 
         // KILL MAN: Probably needs to be a FixedUpdate
+        // And also FixedTime step is 0.0833333 for 120 FPS
         private void FixedUpdate()
         {
             bool leftHandColliding = false;
@@ -109,7 +112,7 @@
             RaycastHit hitInfo;
 
             hBodyCollider.transform.eulerAngles = new Vector3(0, hHeadCollider.transform.eulerAngles.y, 0);
-            Vector3 timeSaving1 = Vector3.down * 2.0f * 9.81f * Time.fixedDeltaTime * Time.fixedDeltaTime;
+            Vector3 timeSaving1 = Vector3.down * 19.6133f * Time.fixedDeltaTime * Time.fixedDeltaTime;
 
             // Left hand
 
@@ -227,12 +230,11 @@
                 rightHandColliding = false;
                 OnSurfaceEndTouch(false, distanceTraveled * Time.fixedDeltaTime);
             }
-
-            // KILL MAN: idk if need this exactly
-            if(bWasLeftHandTouching && !leftHandColliding)
-                OnSurfaceEndTouch(true, distanceTraveled * Time.fixedDeltaTime);
-            else if(bWasRightHandTouching && !rightHandColliding)
-                OnSurfaceEndTouch(false, distanceTraveled * Time.fixedDeltaTime);
+            
+            //if(bWasLeftHandTouching && !leftHandColliding)
+            //    OnSurfaceEndTouch(true, distanceTraveled * Time.fixedDeltaTime);
+            //else if(bWasRightHandTouching && !rightHandColliding)
+            //    OnSurfaceEndTouch(false, distanceTraveled * Time.fixedDeltaTime);
 
             hLeftHandFollower.position = vecLastLeftHandPosition;
             hRightHandFollower.position = vecLastRightHandPosition;
@@ -255,7 +257,7 @@
                 // Take the surface normal that we hit, then along that plane, do a spherecast to a position a small distance away to account for moving perpendicular to that surface
                 Vector3 firstPosition = endPosition;
                 gorillaSurface = hitInfo.collider.GetComponent<Surface>();
-                slipPercentage = gorillaSurface != null ? gorillaSurface.flSlipPercentage : (!singleHand ? Surface.flDefaultSlipPercentage : 0.001f);
+                slipPercentage = gorillaSurface != null ? gorillaSurface.flSlipPercentage : (singleHand ? Surface.flDefaultSlipPercentage : Surface.flDefaultSlipPercentageHug);
                 movementToProjectedAboveCollisionPlane = Vector3.ProjectOnPlane(startPosition + movementVector - firstPosition, hitInfo.normal) * slipPercentage;
                 if (CollisionsSphereCast(endPosition, sphereRadius, movementToProjectedAboveCollisionPlane, precision * precision, out endPosition, out hitInfo))
                 {
@@ -293,7 +295,7 @@
             // Kind of like a souped up spherecast. Includes checks to make sure that the sphere we're using, if it touches a surface, is pushed away the correct distance (the original sphereradius distance). Since you might
             // be pushing into sharp corners, this might not always be valid, so that's what the extra checks are for
 
-            // Initial spherecase
+            // Initial spherecast
             RaycastHit innerHit;
             if (Physics.SphereCast(startPosition, sphereRadius * precision, movementVector, out hitInfo, movementVector.magnitude + sphereRadius * (1 - precision), stLocomotionEnabledLayers.value))
             {
@@ -339,7 +341,7 @@
             Quaternion tmp = Quaternion.Euler(0, degrees, 0); // KILL MAN: Do not calculate it that often..?
             transform.RotateAround(hHeadCollider.transform.position, transform.up, degrees);
             vecDenormalizedVelAverage = tmp * vecDenormalizedVelAverage;
-            for (int i = 0; i < vecVelHistory.Length; ++i)
+            for (int i = 0; i < nVelHistoryLength; ++i)
             {
                 vecVelHistory[i] = tmp * vecVelHistory[i];
             }
